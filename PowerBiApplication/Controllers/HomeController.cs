@@ -19,6 +19,7 @@ namespace PowerBiApplication.Controllers
     public class HomeController : Controller
     {
         private readonly ILogger<HomeController> _logger;
+        public static string _accessToken;
         public string AccessToken { get; set; }
         public AppSettings AppSettings { get; }
         IConfiguration _iconfiguration;
@@ -48,6 +49,13 @@ namespace PowerBiApplication.Controllers
         {
             return View();
         }
+        public async Task<IActionResult> Report()
+        {            
+            AccessToken = _accessToken;
+            ViewBag.AccessToken = AccessToken;
+            Task.Run(async () => await EmbedReport()).Wait();
+            return View();
+        }
 
         [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
         public IActionResult Error()
@@ -57,7 +65,7 @@ namespace PowerBiApplication.Controllers
         public async Task<IActionResult> GetPowerBIAccessToken()
         {
             AccessToken=await GetAccessToken();
-
+            _accessToken = AccessToken;
             using (var client = new PowerBIClient(new Uri(AppSettings.ApiUrl), new TokenCredentials(AccessToken, "Bearer")))
 
             {
@@ -127,6 +135,36 @@ namespace PowerBiApplication.Controllers
             var AAD = JsonConvert.DeserializeObject<PowerBI.Models.AAD>(tokenresult);
 
             return AAD.AccessToken;
+        }
+        private async Task EmbedReport()
+        {
+            using (var client = new PowerBIClient(new Uri(AppSettings.ApiUrl), new TokenCredentials(AccessToken, "Bearer")))
+            {
+                Guid groupId = (await client.Groups.GetGroupsAsync()).Value.FirstOrDefault().Id;
+                
+                if (groupId == Guid.Empty)
+                {
+                    // no groups available for user
+                    string message = "No group available, need to create a group and upload a report";
+                    Response.Redirect($"Error?message={message}");
+                }
+
+                // getting first report in selected group from GetReports results
+                Report report = (await client.Reports.GetReportsInGroupAsync(groupId)).Value.FirstOrDefault();
+
+                if (report != null)
+                {
+                    ViewBag.EmbedUrl = report.EmbedUrl + "?rs:Command=Render&rc:Toolbar=true";
+                    ViewBag.ReportId = report.Id;
+                }
+                else
+                {
+                    // no reports available for user in chosen group
+                    // need to upload a report or insert a specific group id in appsettings.json
+                    string message = "No report available in workspace with ID " + groupId + ", Please fill a group id with existing report in appsettings.json file";
+                    Response.Redirect($"Error?message={message}");
+                }
+            }
         }
     }
 }
